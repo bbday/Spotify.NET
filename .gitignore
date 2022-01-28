@@ -48,6 +48,12 @@ Generated\ Files/
 TestResult.xml
 nunit-*.xml
 
+samples/SpotifyNET.ConsoleSample/.idea
+samples/SpotifyNET.ConsoleSample/obj
+samples/SpotifyNET.ConsoleSample/bin
+src/bin
+src/obj
+src/.idea
 # Build Results of an ATL Project
 [Dd]ebugPS/
 [Rr]eleasePS/
