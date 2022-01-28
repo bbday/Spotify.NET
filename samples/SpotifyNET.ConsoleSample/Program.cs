@@ -9,6 +9,7 @@ using Spotify.Metadata;
 using SpotifyNET;
 using SpotifyNET.Enums;
 using SpotifyNET.Helpers;
+using SpotifyNET.Interfaces;
 using SpotifyNET.Models;
 using SpotifyNET.OneTimeStructures;
 
@@ -17,20 +18,26 @@ var pass = Environment.GetEnvironmentVariable("spotify_pass", EnvironmentVariabl
 var userpass = new UserPassAuthenticator("christos@marteco.nl", pass);
 
 var client = new SpotifyClient(userpass, SpotifyConfig.Default);
-var t = Stopwatch.StartNew();
-var ap = await client.ConnectAndAuthenticateAsync();
-t.Stop();
-var e = t.ElapsedMilliseconds;
+var apWelcome = await client.ConnectAndAuthenticateAsync();
 
-var token = await client.GetBearerAsync();
-Console.WriteLine(token.AccessToken);
+Console.WriteLine($"Welcome {apWelcome.CanonicalUsername}");
 
+ISpotifyRemoteConnect connect = new SpotifyRemoteConnect(client);
+var cluster = await connect.ConnectAsync();
 
-var metadataurl = SpotifyId.With("1GxkXlMwML1oSg5eLPiAz3", AudioItemType.Artist)
+var m = new ManualResetEvent(false);
+m.WaitOne();
+
+var token =await client.GetBearerAsync();
+
+Console.WriteLine($"Bearer: \r\n {token.AccessToken}");
+
+var michaelBubleMetadataUrl = SpotifyId.With("1GxkXlMwML1oSg5eLPiAz3", AudioItemType.Artist)
     .Metadata();
 
-var metadata = await client.TcpState.
-    SendAndReceiveAsResponse(metadataurl, MercuryRequestType.Get);
-var track = Artist.Parser.ParseFrom(metadata.Value.Payload.SelectMany(a => a).ToArray());
+var michaelBubleMetadataResponse = await client.TcpState!.
+    SendAndReceiveAsResponse(michaelBubleMetadataUrl, MercuryRequestType.Get);
 
-var k = "";
+var michaelBubleMetadata = Artist.Parser.ParseFrom(michaelBubleMetadataResponse.Value.Payload.SelectMany(a => a).ToArray());
+
+Console.WriteLine(michaelBubleMetadata);

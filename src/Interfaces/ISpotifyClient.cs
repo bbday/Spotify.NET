@@ -34,9 +34,9 @@ namespace SpotifyNET.Interfaces
         /// <returns></returns>
         Task<APWelcome> ConnectAndAuthenticateAsync(CancellationToken ct = default);
 
-        ValueTask<MercuryToken> GetBearerAsync(CancellationToken ct = default);
+        Task<MercuryToken> GetBearerAsync(CancellationToken ct = default);
 
-        ValueTask<T> SendAndReceiveAsJson<T>(
+        Task<T> SendAndReceiveAsJson<T>(
             string mercuryUri,
             MercuryRequestType type = MercuryRequestType.Get,
             CancellationToken ct = default);

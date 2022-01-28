@@ -23,12 +23,12 @@ public interface ISpotifyTcpState : IDisposable
 
     Task ConnectToTcpClient(CancellationToken ct = default);
 
-    ValueTask SendPackageAsync(
+    Task SendPackageAsync(
         MercuryPacket packet,
         CancellationToken ct = default);
 
-    ValueTask<MercuryPacket> ReceivePackageAsync(
+    Task<MercuryPacket> ReceivePackageAsync(
         CancellationToken ct);
 
-    ValueTask<MercuryResponse?> SendAndReceiveAsResponse(string mercuryUri, MercuryRequestType type, CancellationToken ct = default);
+    Task<MercuryResponse?> SendAndReceiveAsResponse(string mercuryUri, MercuryRequestType type, CancellationToken ct = default);
 }

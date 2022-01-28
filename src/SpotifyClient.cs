@@ -112,7 +112,7 @@ namespace SpotifyNET
             }
         }
 
-        public async ValueTask<MercuryToken> GetBearerAsync(CancellationToken ct = default)
+        public async Task<MercuryToken> GetBearerAsync(CancellationToken ct = default)
         {
             using (await TokenLock.LockAsync(ct))
             {
@@ -128,7 +128,7 @@ namespace SpotifyNET
             }
         }
 
-        public async ValueTask<T> SendAndReceiveAsJson<T>(
+        public async Task<T> SendAndReceiveAsJson<T>(
             string mercuryUri,
             MercuryRequestType type = MercuryRequestType.Get,
             CancellationToken ct = default)
@@ -144,7 +144,7 @@ namespace SpotifyNET
         
         
         
-        public async ValueTask UpdateLocaleAsync(string locale, CancellationToken ct = default)
+        public async Task UpdateLocaleAsync(string locale, CancellationToken ct = default)
         {
             if (TcpState is not
                 {
@@ -196,5 +196,10 @@ namespace SpotifyNET
         {
             PropertyNameCaseInsensitive = true
         };
+
+        public object Clone()
+        {
+            throw new NotImplementedException();
+        }
     }
 }

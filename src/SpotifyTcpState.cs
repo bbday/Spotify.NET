@@ -231,7 +231,7 @@ internal class SpotifyTcpState : ISpotifyTcpState,
     }
 
 
-    public async ValueTask<MercuryResponse?> SendAndReceiveAsResponse(
+    public async Task<MercuryResponse?> SendAndReceiveAsResponse(
         string mercuryUri,
         MercuryRequestType type = MercuryRequestType.Get,
         CancellationToken ct = default)
@@ -286,7 +286,6 @@ internal class SpotifyTcpState : ISpotifyTcpState,
         _waiters[sequence] = (wait, null);
         await SendPackageAsync(new MercuryPacket(cmd, bytesOut.ToArray()), ct);
         await wait.WaitAsync(ct);
-
         _waiters.TryRemove(sequence, out var a);
         return a.Response;
     }
@@ -296,7 +295,7 @@ internal class SpotifyTcpState : ISpotifyTcpState,
     /// </summary>
     /// <param name="packet"></param>
     /// <returns></retuprns>
-    public async ValueTask SendPackageAsync(
+    public async Task SendPackageAsync(
         MercuryPacket packet,
         CancellationToken ct = default)
     {
@@ -331,7 +330,7 @@ internal class SpotifyTcpState : ISpotifyTcpState,
     /// Waits and receives a package (blocking function)
     /// </summary>
     /// <returns></returns>
-    public async ValueTask<MercuryPacket> ReceivePackageAsync(
+    public async Task<MercuryPacket> ReceivePackageAsync(
         CancellationToken ct)
     {
         using (await ReceiveLock.LockAsync(ct))
