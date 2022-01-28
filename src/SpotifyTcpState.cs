@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Threading;
@@ -23,9 +27,20 @@ namespace SpotifyNET;
 internal class SpotifyTcpState : ISpotifyTcpState,
     IDisposable
 {
+    internal volatile int Sequence;
+
+    private CancellationTokenSource _packageListenerTokenSource;
+    private Shannon ReceiveCipher;
+    private Shannon SendCipher;
+    private AsyncLock ReceiveLock = new AsyncLock();
+    private AsyncLock SendLock = new AsyncLock();
+    internal ConcurrentDictionary<long, List<byte[]>>
+        _partials = new ConcurrentDictionary<long, List<byte[]>>();
+    internal ConcurrentDictionary<long, (AsyncAutoResetEvent Waiter, MercuryResponse? Response)> 
+        _waiters = new ConcurrentDictionary<long, (AsyncAutoResetEvent Waiter, MercuryResponse? Response)>();
 
     public SpotifyTcpState(string host,
-        ushort port) 
+        ushort port)
     {
         ConnectedHostUrl = host;
         ConnectedHostPort = port;
@@ -34,14 +49,9 @@ internal class SpotifyTcpState : ISpotifyTcpState,
             ReceiveTimeout = 500
         };
     }
-    
+
     public TcpClient TcpClient { get; }
-    private Shannon ReceiveCipher;
-    private Shannon SendCipher;
-    private AsyncLock ReceiveLock = new AsyncLock();
-    private AsyncLock SendLock = new AsyncLock();
-    
-    
+
     public string ConnectedHostUrl { get; }
     public ushort ConnectedHostPort { get; }
 
@@ -220,7 +230,67 @@ internal class SpotifyTcpState : ISpotifyTcpState,
         networkStream.ReadTimeout = Timeout.Infinite;
     }
 
-    
+
+    public async ValueTask<MercuryResponse?> SendAndReceiveAsResponse(
+        string mercuryUri,
+        MercuryRequestType type = MercuryRequestType.Get,
+        CancellationToken ct = default)
+    {
+        var sequence = Interlocked.Increment(ref Sequence);
+
+        var req = type switch
+        {
+            MercuryRequestType.Get => RawMercuryRequest.Get(mercuryUri),
+            MercuryRequestType.Sub => RawMercuryRequest.Sub(mercuryUri),
+            MercuryRequestType.Unsub => RawMercuryRequest.Unsub(mercuryUri)
+        };
+
+        var requestPayload = req.Payload.ToArray();
+        var requestHeader = req.Header;
+
+        using var bytesOut = new MemoryStream();
+        var s4B = BitConverter.GetBytes((short) 4).Reverse().ToArray();
+        bytesOut.Write(s4B, 0, s4B.Length); // Seq length
+
+        var seqB = BitConverter.GetBytes(sequence).Reverse()
+            .ToArray();
+        bytesOut.Write(seqB, 0, seqB.Length); // Seq
+
+        bytesOut.WriteByte(1); // Flags
+        var reqpB = BitConverter.GetBytes((short) (1 + requestPayload.Length)).Reverse().ToArray();
+        bytesOut.Write(reqpB, 0, reqpB.Length); // Parts count
+
+        var headerBytes2 = requestHeader.ToByteArray();
+        var hedBls = BitConverter.GetBytes((short) headerBytes2.Length).Reverse().ToArray();
+
+        bytesOut.Write(hedBls, 0, hedBls.Length); // Header length
+        bytesOut.Write(headerBytes2, 0, headerBytes2.Length); // Header
+
+
+        foreach (var part in requestPayload)
+        {
+            // Parts
+            var l = BitConverter.GetBytes((short) part.Length).Reverse().ToArray();
+            bytesOut.Write(l, 0, l.Length);
+            bytesOut.Write(part, 0, part.Length);
+        }
+
+        var cmd = type switch
+        {
+            MercuryRequestType.Sub => MercuryPacketType.MercurySub,
+            MercuryRequestType.Unsub => MercuryPacketType.MercuryUnsub,
+            _ => MercuryPacketType.MercuryReq
+        };
+
+        var wait = new AsyncAutoResetEvent(false);
+        _waiters[sequence] = (wait, null);
+        await SendPackageAsync(new MercuryPacket(cmd, bytesOut.ToArray()), ct);
+        await wait.WaitAsync(ct);
+
+        _waiters.TryRemove(sequence, out var a);
+        return a.Response;
+    }
+
     /// <summary>
     /// Fire and forget package sending. Somewhat async but mostly relies on Task.Run()
     /// </summary>
@@ -255,13 +325,13 @@ internal class SpotifyTcpState : ISpotifyTcpState,
             await networkStream.FlushAsync(ct);
         }
     }
-    
-    
+
+
     /// <summary>
     /// Waits and receives a package (blocking function)
     /// </summary>
     /// <returns></returns>
-    public  async ValueTask<MercuryPacket> ReceivePackageAsync(
+    public async ValueTask<MercuryPacket> ReceivePackageAsync(
         CancellationToken ct)
     {
         using (await ReceiveLock.LockAsync(ct))
@@ -291,12 +361,13 @@ internal class SpotifyTcpState : ISpotifyTcpState,
             return new MercuryPacket((MercuryPacketType) cmd, payloadBytes);
         }
     }
-    
+
     public void Dispose()
     {
+        _packageListenerTokenSource?.Dispose();
         TcpClient?.Dispose();
     }
-    
+
     private static ClientHello GetClientHello(DiffieHellman publickey)
     {
         var clientHello = new ClientHello
@@ -328,4 +399,202 @@ internal class SpotifyTcpState : ISpotifyTcpState,
         return clientHello;
     }
 
+
+
+    internal bool StartListeningForPackages()
+    {
+        lock (_packageslock)
+        {
+            try
+            {
+                _packageListenerTokenSource?.Cancel();
+                _packageListenerTokenSource?.Dispose();
+            }
+            catch (Exception)
+            {
+            }
+
+            _packageListenerTokenSource = new CancellationTokenSource();
+            WaitForPackages();
+            return true;
+        }
+    }
+
+    private bool StopListeningForPackages()
+    {
+        lock (_packageslock)
+        {
+            _packageListenerTokenSource?.Cancel();
+            _packageListenerTokenSource?.Dispose();
+            return false;
+        }
+    }
+
+    private async Task WaitForPackages()
+    {
+        while (!_packageListenerTokenSource.Token.IsCancellationRequested)
+        {
+            try
+            {
+                var newPacket = await ReceivePackageAsync(_packageListenerTokenSource.Token);
+                if (!Enum.TryParse(newPacket.Cmd.ToString(), out MercuryPacketType cmd))
+                {
+                    Debug.WriteLine(
+                        $"Skipping unknown command cmd: {newPacket.Cmd}," +
+                        $" payload: {newPacket.Payload.BytesToHex()}");
+                    continue;
+                }
+
+                switch (cmd)
+                {
+                    case MercuryPacketType.Ping:
+                        Debug.WriteLine("Receiving ping..");
+                        try
+                        {
+                            await SendPackageAsync(new MercuryPacket(MercuryPacketType.Pong,
+                                newPacket.Payload), _packageListenerTokenSource.Token);
+                        }
+                        catch (IOException ex)
+                        {
+                            Debug.WriteLine("Failed sending Pong!", ex);
+                            Debugger.Break();
+                            //TODO: Reconnect
+                        }
+
+                        break;
+                    case MercuryPacketType.PongAck:
+                        break;
+                    case MercuryPacketType.MercuryReq:
+                    case MercuryPacketType.MercurySub:
+                    case MercuryPacketType.MercuryUnsub:
+                    case MercuryPacketType.MercuryEvent:
+                        //Handle mercury packet..
+                        // con.HandleMercury(newPacket);
+                        HandleMercury(newPacket);
+                        break;
+                    case MercuryPacketType.AesKeyError:
+                    case MercuryPacketType.AesKey:
+                        //_ = HandleAesKey(newPacket, linked.Token);
+                        break;
+                }
+            }
+            catch (IOException io)
+            {
+                Debug.WriteLine(io.ToString());
+                if (!IsConnected)
+                {
+                    // DisconnectionHappened?.Invoke(this,
+                    //new DisconnectionRecord(DisconnectionReasonType.ExceptionOccurred, io));
+                    break;
+                }
+            }
+            catch (TaskCanceledException cancelled)
+            {
+                Debug.WriteLine(cancelled.ToString());
+                break;
+            }
+            catch (ObjectDisposedException disposed)
+            {
+                Debug.WriteLine(disposed.ToString());
+                break;
+            }
+            catch (Exception x)
+            {
+                Debug.WriteLine(x.ToString());
+            }
+        }
+
+    }
+
+    private void HandleMercury(MercuryPacket packet)
+    {
+        using var stream = new MemoryStream(packet.Payload);
+        int seqLength = packet.Payload.getShort((int) stream.Position, true);
+        stream.Seek(2, SeekOrigin.Current);
+        long seq = 0;
+        var buffer = packet.Payload;
+        switch (seqLength)
+        {
+            case 2:
+                seq = packet.Payload.getShort((int) stream.Position, true);
+                stream.Seek(2, SeekOrigin.Current);
+                break;
+            case 4:
+                seq = packet.Payload.getInt((int) stream.Position, true);
+                stream.Seek(4, SeekOrigin.Current);
+                break;
+            case 8:
+                seq = packet.Payload.getLong((int) stream.Position, true);
+                stream.Seek(8, SeekOrigin.Current);
+                break;
+        }
+
+        var flags = packet.Payload[(int) stream.Position];
+        stream.Seek(1, SeekOrigin.Current);
+        var parts = packet.Payload.getShort((int) stream.Position, true);
+        stream.Seek(2, SeekOrigin.Current);
+
+        _partials.TryGetValue(seq, out var partial);
+        partial ??= new List<byte[]>();
+        if (!partial.Any() || flags == 0)
+        {
+            partial = new List<byte[]>();
+            _partials.TryAdd(seq, partial);
+        }
+
+        Debug.WriteLine("Handling packet, cmd: " +
+                        $"{packet.Cmd}, seq: {seq}, flags: {flags}, parts: {parts}");
+
+        for (var j = 0; j < parts; j++)
+        {
+            var size = packet.Payload.getShort((int) stream.Position, true);
+            stream.Seek(2, SeekOrigin.Current);
+
+            var buffer2 = new byte[size];
+
+            var end = buffer2.Length;
+            for (var z = 0; z < end; z++)
+            {
+                var a = packet.Payload[(int) stream.Position];
+                stream.Seek(1, SeekOrigin.Current);
+                buffer2[z] = a;
+            }
+
+            partial.Add(buffer2);
+            _partials[seq] = partial;
+        }
+
+        if (flags != 1) return;
+
+        _partials.TryRemove(seq, out partial);
+        Header header;
+        try
+        {
+            header = Header.Parser.ParseFrom(partial.First());
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Couldn't parse header! bytes: {partial.First().BytesToHex()}");
+            throw ex;
+        }
+
+        var resp = new MercuryResponse(header, partial, seq);
+        switch (packet.Cmd)
+        {
+            case MercuryPacketType.MercuryReq:
+                var a = _waiters[seq];
+                a.Response = resp;
+                _waiters[seq] = a;
+                a.Waiter.Set();
+                break;
+            case MercuryPacketType.MercuryEvent:
+                //Debug.WriteLine();
+                break;
+            default:
+                Debugger.Break();
+                break;
+        }
+    }
+
+    private object _packageslock = new object();
 }

@@ -3,6 +3,7 @@ using System;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using SpotifyNET.Enums;
 using SpotifyNET.Models;
 
 namespace SpotifyNET.Interfaces;
@@ -28,4 +29,6 @@ public interface ISpotifyTcpState : IDisposable
 
     ValueTask<MercuryPacket> ReceivePackageAsync(
         CancellationToken ct);
+
+    ValueTask<MercuryResponse?> SendAndReceiveAsResponse(string mercuryUri, MercuryRequestType type, CancellationToken ct = default);
 }

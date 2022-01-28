@@ -2,6 +2,8 @@
 using System.Threading;
 using System.Threading.Tasks;
 using CPlayerLib;
+using SpotifyNET.Enums;
+using SpotifyNET.Models;
 using SpotifyNET.OneTimeStructures;
 
 namespace SpotifyNET.Interfaces
@@ -31,5 +33,12 @@ namespace SpotifyNET.Interfaces
         /// <param name="ct"></param>
         /// <returns></returns>
         Task<APWelcome> ConnectAndAuthenticateAsync(CancellationToken ct = default);
+
+        ValueTask<MercuryToken> GetBearerAsync(CancellationToken ct = default);
+
+        ValueTask<T> SendAndReceiveAsJson<T>(
+            string mercuryUri,
+            MercuryRequestType type = MercuryRequestType.Get,
+            CancellationToken ct = default);
     }
 }

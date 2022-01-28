@@ -1,12 +1,15 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.NetworkInformation;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CPlayerLib;
 using Google.Protobuf;
+using Nito.AsyncEx;
 using SpotifyNET.Enums;
 using SpotifyNET.Exceptions;
 using SpotifyNET.Helpers;
@@ -16,7 +19,9 @@ using SpotifyNET.OneTimeStructures;
 
 namespace System.Runtime.CompilerServices
 {
-    internal static class IsExternalInit { }
+    internal static class IsExternalInit
+    {
+    }
 }
 
 namespace SpotifyNET
@@ -24,6 +29,8 @@ namespace SpotifyNET
     public class SpotifyClient : ISpotifyClient, IDisposable
     {
         private readonly IAuthenticator _authenticator;
+        internal AsyncLock TokenLock = new AsyncLock();
+        internal ConcurrentBag<MercuryToken> Tokens = new ConcurrentBag<MercuryToken>();
 
         /// <summary>
         /// Create a new instance of SpotifyClient. 
@@ -63,7 +70,8 @@ namespace SpotifyNET
             Debug.WriteLine($"Fetched: {accessPoint.host}:{accessPoint.port} as AP.");
 
 
-            TcpState = new SpotifyTcpState(accessPoint.host, accessPoint.port);
+            var tcpState = new SpotifyTcpState(accessPoint.host, accessPoint.port);
+            TcpState = tcpState;
             await TcpState.ConnectToTcpClient(ct);
 
             var credentials = await
@@ -94,7 +102,7 @@ namespace SpotifyNET
             {
                 case MercuryPacketType.APWelcome:
                     await UpdateLocaleAsync(Config.Locale, ct);
-                    //StartListeningForPackages();
+                    tcpState.StartListeningForPackages();
                     ApWelcome = APWelcome.Parser.ParseFrom(packet.Payload);
                     return ApWelcome;
                 case MercuryPacketType.AuthFailure:
@@ -104,9 +112,44 @@ namespace SpotifyNET
             }
         }
 
+        public async ValueTask<MercuryToken> GetBearerAsync(CancellationToken ct = default)
+        {
+            using (await TokenLock.LockAsync(ct))
+            {
+                var tokenOrDefault =
+                    FindNonExpiredToken();
+                if (tokenOrDefault.HasValue) return tokenOrDefault.Value;
+
+                var newToken = await SendAndReceiveAsJson<MercuryToken>(
+                    "hm://keymaster/token/authenticated?scope=playlist-read" +
+                    $"&client_id={Consts.KEYMASTER_CLIENT_ID}&device_id=", ct: ct);
+                Tokens.Add(newToken);
+                return newToken;
+            }
+        }
+
+        public async ValueTask<T> SendAndReceiveAsJson<T>(
+            string mercuryUri,
+            MercuryRequestType type = MercuryRequestType.Get,
+            CancellationToken ct = default)
+        {
+            var response = await TcpState.SendAndReceiveAsResponse(mercuryUri, type, ct);
+            if (response is {StatusCode: >= 200 and < 300})
+            {
+                return Deserialize<T>(response.Value);
+            }
+
+            throw new MercuryException(response);
+        }
+        
+        
         
         public async ValueTask UpdateLocaleAsync(string locale, CancellationToken ct = default)
         {
+            if (TcpState is not
+                {
+                    IsConnected: true
+                }) throw new InvalidOperationException("Not connected to spotify.");
             using var preferredLocale = new MemoryStream(18 + 5);
             preferredLocale.WriteByte(0x0);
             preferredLocale.WriteByte(0x0);
@@ -119,7 +162,7 @@ namespace SpotifyNET
                 preferredLocale.ToArray()), ct);
         }
 
-        
+
         /// <summary>
         /// Contains metadata about the current authenticated user, such as their spotify id, and reusable auth credentials.
         /// </summary>
@@ -136,6 +179,22 @@ namespace SpotifyNET
         public void Dispose()
         {
             TcpState?.Dispose();
+        }    
+        internal MercuryToken? FindNonExpiredToken()
+        {
+            var a =
+                Tokens.FirstOrDefault(token => !token.IsExpired());
+            if (string.IsNullOrEmpty(a.AccessToken)) return null;
+            return a;
         }
+        
+        private static T Deserialize<T>(MercuryResponse resp) =>
+            System.Text.Json.JsonSerializer.Deserialize<T>(
+                new ReadOnlySpan<byte>(resp.Payload.SelectMany(z => z).ToArray()), opts);
+        
+        public static readonly JsonSerializerOptions opts = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
     }
 }
