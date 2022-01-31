@@ -1,12 +1,14 @@
 ﻿using System;
 using System.IO;
 using System.IO.Compression;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using Connectstate;
 using Google.Protobuf;
+using SpotifyNET.Enums;
 using SpotifyNET.Interfaces;
 using SpotifyNET.Models;
 
@@ -16,73 +18,52 @@ public class SpotifyRemoteState : ISpotifyRemoteState
 {
     private readonly SpotifyRemoteConnect _spotifyRemoteConnect;
 
-    internal SpotifyRemoteState(SpotifyRemoteConnect spotifyRemoteConnect)
+    internal SpotifyRemoteState(SpotifyRemoteConnect spotifyRemoteConnect,
+        ISpotifyPlayer player)
     {
+        Player = player ?? new InternalBarebonesNoPlayer(spotifyRemoteConnect.SpotifyClient.Config);
         _spotifyRemoteConnect = spotifyRemoteConnect;
         _spotifyRemoteConnect.ConnectionIdUpdated += SpotifyRemoteConnectOnConnectionIdUpdated;
-        PutState = new PutStateRequest
-        {
-            MemberType = MemberType.ConnectState,
-            Device = new Device
-            {
-                DeviceInfo = new DeviceInfo()
-                {
-                    CanPlay = true,
-                    Volume = 65536,
-                    Name = _spotifyRemoteConnect.SpotifyClient.Config.DeviceName,
-                    DeviceId = _spotifyRemoteConnect.SpotifyClient.Config.DeviceId,
-                    DeviceType = DeviceType.Computer,
-                    DeviceSoftwareVersion = "Spotify-11.1.0",
-                    SpircVersion = "3.2.6",
-                    Capabilities = new Capabilities
-                    {
-                        CanBePlayer = true,
-                        GaiaEqConnectId = true,
-                        SupportsLogout = true,
-                        VolumeSteps = 64,
-                        IsObservable = true,
-                        CommandAcks = true,
-                        SupportsRename = false,
-                        SupportsPlaylistV2 = true,
-                        IsControllable = true,
-                        SupportsCommandRequest = true,
-                        SupportsTransferCommand = true,
-                        SupportsGzipPushes = true,
-                        NeedsFullPlayerState = false,
-                        SupportedTypes =
-                        {
-                            "audio/episode",
-                            "audio/track"
-                        }
-                    }
-                }
-            }
-        };
     }
 
     private void SpotifyRemoteConnectOnConnectionIdUpdated(object sender, string e)
     {
-        State = InitState(State);
+        Player.State = InitState(Player.State);
     }
 
-    public PlayerState State { get; private set; }
-    public PutStateRequest PutState { get; private set; }
+    private string _lastCommandSentByDeviceId;
+    public ISpotifyPlayer? Player { get; }
+
+    public async Task<RequestResult> OnRequest(SpotifyWebsocketRequest request)
+    {
+        if (Player == null)
+            return RequestResult.DeviceNotFound;
+        
+        _lastCommandSentByDeviceId = request.Sender;
+        if (!request.Command.TryGetProperty("endpoint", out var endpoinStr))
+            return RequestResult.UnknownSendCommandResult;
+        var endpointNullable = endpoinStr.GetString().StringToEndPoint();
+        if (!endpointNullable.HasValue)
+            return RequestResult.UnknownSendCommandResult;
+        return await Task.Run(() =>
+            Player.IncomingCommand(endpointNullable.Value, new CommandBody(request.Command)));
+    }
 
     public async Task<byte[]> UpdateState(
-        PutStateReason reason, PlayerState st,
+        PutStateReason reason, 
         int playertime = -1)
     {
         var timestamp = (ulong) TimeHelper.CurrentTimeMillisSystem;
         if (playertime == -1)
-            PutState.HasBeenPlayingForMs = 0L;
+            Player.PutState.HasBeenPlayingForMs = 0L;
         else
-            PutState.HasBeenPlayingForMs = (ulong) Math.Min((ulong) playertime,
-                timestamp - PutState.StartedPlayingAt);
+            Player.PutState.HasBeenPlayingForMs = (ulong) Math.Min((ulong) playertime,
+                timestamp - Player.PutState.StartedPlayingAt);
 
-        PutState.PutStateReason = reason;
-        PutState.ClientSideTimestamp = timestamp;
-        PutState.Device.PlayerState = st;
-        var asBytes = PutState.ToByteArray();
+        Player.PutState.PutStateReason = reason;
+        Player.PutState.ClientSideTimestamp = timestamp;
+        Player.PutState.Device.PlayerState = Player.State;
+        var asBytes = Player.PutState.ToByteArray();
         using var ms = new MemoryStream();
         using (var gzip = new GZipStream(ms, CompressionMode.Compress, true))
         {
@@ -130,8 +111,8 @@ public class SpotifyRemoteState : ISpotifyRemoteState
             return playerState;
         }
 
-        PutState.Device.DeviceInfo.Name = _spotifyRemoteConnect.SpotifyClient.Config.DeviceName;
-        PutState.Device.DeviceInfo.DeviceId = _spotifyRemoteConnect.SpotifyClient.Config.DeviceId;
+        Player.PutState.Device.DeviceInfo.Name = _spotifyRemoteConnect.SpotifyClient.Config.DeviceName;
+        Player.PutState.Device.DeviceInfo.DeviceId = _spotifyRemoteConnect.SpotifyClient.Config.DeviceId;
 
         return new PlayerState
         {

@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpotifyNET", "SpotifyNET.cs
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpotifyNET.ConsoleSample", "..\samples\SpotifyNET.ConsoleSample\SpotifyNET.ConsoleSample.csproj", "{FAC82F82-CA95-4B13-8E17-D22E06097E71}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpotifyNET.WpfSample", "..\samples\SpotifyNET.WpfSample\SpotifyNET.WpfSample.csproj", "{BFB6BA79-6FDA-4CEB-A58C-9ED7A289FEF2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{FAC82F82-CA95-4B13-8E17-D22E06097E71}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FAC82F82-CA95-4B13-8E17-D22E06097E71}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{FAC82F82-CA95-4B13-8E17-D22E06097E71}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BFB6BA79-6FDA-4CEB-A58C-9ED7A289FEF2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BFB6BA79-6FDA-4CEB-A58C-9ED7A289FEF2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BFB6BA79-6FDA-4CEB-A58C-9ED7A289FEF2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BFB6BA79-6FDA-4CEB-A58C-9ED7A289FEF2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

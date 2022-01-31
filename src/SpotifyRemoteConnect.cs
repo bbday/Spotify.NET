@@ -1,4 +1,5 @@
-﻿using System;
+﻿#nullable enable
+using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
@@ -18,6 +19,7 @@ using System.Timers;
 using System.Web;
 using Connectstate;
 using Nito.AsyncEx;
+using SpotifyNET.Enums;
 using SpotifyNET.Helpers;
 using SpotifyNET.Interfaces;
 using SpotifyNET.Models;
@@ -37,15 +39,18 @@ public class SpotifyRemoteConnect : ISpotifyRemoteConnect
     private string? _conId;
 
     internal HttpClient PutHttpClient { get; private set; }
-
+    
     /// <summary>
     /// Create a new instance of SpotifyRemoteConnect. 
     /// </summary>
-    public SpotifyRemoteConnect(SpotifyClient spotifyClient)
+    /// <param name="spotifyClient"></param>
+    /// <param name="spotifyPlayer">An implementation of <see cref="ISpotifyPlayer"/>. To handle remote commands.</param>
+    public SpotifyRemoteConnect(SpotifyClient spotifyClient,
+        ISpotifyPlayer? spotifyPlayer = null)
     {
         SpotifyClient = spotifyClient;
         _waitForConnectionId = new AsyncManualResetEvent(false);
-        SpotifyRemoteState = new SpotifyRemoteState(this);
+        SpotifyRemoteState = new SpotifyRemoteState(this, spotifyPlayer);
     }
 
     public ISpotifyRemoteState SpotifyRemoteState
@@ -175,7 +180,7 @@ public class SpotifyRemoteConnect : ISpotifyRemoteConnect
             PutHttpClient.DefaultRequestHeaders.Add("X-Spotify-Connection-Id", connId);
             
             var initial = await 
-                SpotifyRemoteState.UpdateState(PutStateReason.NewDevice, SpotifyRemoteState.State);
+                SpotifyRemoteState.UpdateState(PutStateReason.NewDevice);
             CurrentCluster = Cluster.Parser.ParseFrom(initial);
             ConnectionId = connId;
         }
@@ -202,15 +207,21 @@ public class SpotifyRemoteConnect : ISpotifyRemoteConnect
                     }
                     break;
                 case SpotifyWebsocketRequest req:
-                    // var result =
-                    // await Task.Run(() => OnRequest(req));
-                    //SendReply(req.Key, result);
+                    var result = 
+                        await Task.Run(() => SpotifyRemoteState.OnRequest(req));
+                    SendReply(req.Key, result);
                     //Debug.WriteLine("Handled request. key: {0}, result: {1}", req.Key, result);
                     break;
             }
         }
     }
-
+    
+    private void SendReply(string key, RequestResult result) {
+        var success = result == RequestResult.Success;
+        var reply =
+            $"{{\"type\":\"reply\", \"key\": \"{key.ToLower()}\", \"payload\": {{\"success\": {success.ToString().ToLowerInvariant()}}}}}";
+        _socketClient.Send(reply);
+    }
 
     private static ISpotifyWsMsg? AdaptToWsMessage(JsonDocument obj)
     {
