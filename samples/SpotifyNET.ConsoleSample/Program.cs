@@ -25,6 +25,12 @@ Console.WriteLine($"Welcome {apWelcome.CanonicalUsername}");
 ISpotifyRemoteConnect connect = new SpotifyRemoteConnect(client);
 var cluster = await connect.ConnectAsync();
 
+
+connect.ClusterUpdated += (sender, cluster1) =>
+{
+Console.WriteLine(cluster1);
+};
+
 var m = new ManualResetEvent(false);
 m.WaitOne();
 
