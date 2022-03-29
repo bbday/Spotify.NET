@@ -75,12 +75,14 @@ namespace Spotify.NET.Playback
                         return false;
                 }
             }
+
             //if country is null, we just continue and the spotify api will tell us if the content is unavailable.
             var picked = track.File
                 .Where(a => a.HasFormat &&
                             IsVorbis(a.Format))?.ToImmutableArray();
-            var preferredQuality = picked?.FirstOrDefault(a => AudioQualityExtensions.GetQuality(a.Format) == quality) ??
-                                   picked?.FirstOrDefault();
+            var preferredQuality =
+                picked?.FirstOrDefault(a => AudioQualityExtensions.GetQuality(a.Format) == quality) ??
+                picked?.FirstOrDefault();
             if (preferredQuality == null)
                 throw new NotSupportedException("Could not find any vorbis files.");
 
@@ -105,7 +107,7 @@ namespace Spotify.NET.Playback
                     var (chunk, contentLength) = await cdnUrl.ChunkRequest(0, true, ct);
                     var (size, chunks) = GetData(contentLength);
 
-                    var str = 
+                    var str =
                         new SpotifyStream(chunk, chunks, size, key, cdnUrl);
                     if (str.Seek(0xa7, SeekOrigin.Begin) != 0xa7)
                         Debugger.Break();
@@ -185,7 +187,7 @@ namespace Spotify.NET.Playback
             _buffer = new byte[total_chunks][];
             _requested = new bool[total_chunks];
             _requested[0] = true;
-            _available = new bool[total_chunks]; 
+            _available = new bool[total_chunks];
             GetChunkAsync(0, first_chunk).Wait();
         }
         public override void Flush()
@@ -193,58 +195,35 @@ namespace Spotify.NET.Playback
             throw new NotImplementedException();
         }
 
-        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-        {
-            int i = 0;
-            while (true)
-            {
-                try
-                {
-                    var chunk = (int)(Position / CdnUrlExtensions.CHUNK_SIZE);
-                    var chunkOff = (int)(Position % CdnUrlExtensions.CHUNK_SIZE);
-
-                    await GetChunkAsync((ushort)chunk, ct: cancellationToken);
-
-                    int copy = Math.Min(_buffer[chunk].Length - chunkOff, count - i);
-                    Array.Copy(_buffer[chunk], chunkOff, buffer, offset + i, copy);
-                    i += copy;
-                    Position += copy;
-
-                    if (i == count || Position >= Length)
-                        return i;
-                }
-                catch (Exception x)
-                {
-                    Debug.WriteLine(x.ToString());
-                }
-            }
-        }
-
         public override int Read(byte[] buffer, int offset, int count)
         {
-            int i = 0;
-            while (true)
+            if (count == 0) return 0;
+            if (pos >= Length) return -1; 
+            //while (true)
+            //{
+            try
             {
-                try
-                {
-                    var chunk = (int)(Position / CdnUrlExtensions.CHUNK_SIZE);
-                    var chunkOff = (int)(Position % CdnUrlExtensions.CHUNK_SIZE);
+                int chunk = pos / CdnUrlExtensions.CHUNK_SIZE;
+                int chunkOff = pos % CdnUrlExtensions.CHUNK_SIZE;
 
-                    AsyncContext.Run(async () => await GetChunkAsync((ushort) chunk));
+                //AsyncContext.Run(async () => await GetChunkAsync((ushort) chunk));
 
-                    int copy = Math.Min(_buffer[chunk].Length - chunkOff, count - i);
-                    Array.Copy(_buffer[chunk], chunkOff, buffer, offset + i, copy);
-                    i += copy;
-                    Position += copy;
+                if(!_available[chunk]) 
+                    AsyncContext.Run(async () => await GetChunkAsync((ushort)chunk));
+                int copy = Math.Min(_buffer[chunk].Length - chunkOff, count);
+                Array.Copy(_buffer[chunk],
+                    chunkOff, buffer, offset, copy);
+                pos += copy;
 
-                    if (i == count || Position>= Length)
-                        return i;
-                }
-                catch (Exception x)
-                {
-                    Debug.WriteLine(x.ToString());
-                }
+                return copy;
+                //if (i == count || Position >= Length)
             }
+            catch (Exception x)
+            {
+                Debug.WriteLine(x.ToString());
+            }
+            //}
+            return 0;
         }
 
         public override long Seek(long offset, SeekOrigin origin)
@@ -268,7 +247,7 @@ namespace Spotify.NET.Playback
 
         public override void SetLength(long value)
         {
-            throw new NotImplementedException();
+
         }
 
         public override void Write(byte[] buffer, int offset, int count)
@@ -280,8 +259,12 @@ namespace Spotify.NET.Playback
         public override bool CanSeek => true;
         public override bool CanWrite => false;
         public override long Length { get; }
-        public override long Position { get; set; }
-
+        public override long Position
+        {
+            get => pos;
+            set => pos = (int)value;
+        }
+        private int pos;
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
@@ -294,6 +277,8 @@ namespace Spotify.NET.Playback
                       (await _cdnUrl.ChunkRequest(index, ct: ct)).chunk;
             _audioDecrypt.DecryptChunk(index, get);
             Debug.WriteLine($"Chunk {index + 1}/{_available.Length} completed," +
+                            $" stream: {ToString()}");
+            Console.WriteLine($"Chunk {index + 1}/{_available.Length} completed," +
                             $" stream: {ToString()}");
             _available[index] = true;
             _buffer[index] = get;

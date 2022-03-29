@@ -32,7 +32,7 @@ namespace Spotify.NET.Playback.Models
             _client = new HttpClient();
         }
 
-        public static readonly uint CHUNK_SIZE = 2 * 128 * 1024;
+        public static readonly int CHUNK_SIZE = 2 * 2 * 128 * 1024;
 
         public static async Task<(byte[] chunk, string? content_length)> ChunkRequest(this CdnUrl cdnUrl, ushort chunk_index,
             bool return_content_length = false,
