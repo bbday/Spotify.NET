@@ -46,6 +46,9 @@ namespace SpotifyNET
             Config = config;
         }
 
+        public string? ReceivedCountryCode => TcpState?.ReceivedCountryCode;
+
+
         public async Task<APWelcome> ConnectAndAuthenticateAsync(CancellationToken ct = default)
         {
             (string host, ushort port) accessPoint;
@@ -141,9 +144,52 @@ namespace SpotifyNET
 
             throw new MercuryException(response);
         }
-        
-        
-        
+        private static readonly byte[] ZERO_SHORT = new byte[] { 0, 0 };
+        private volatile int audioSeqHolder;
+        public async Task<byte[]> GetAudioKeyAsync(ByteString trackGid, ByteString preferredQualityFileId, 
+            bool retry = false,
+            CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref audioSeqHolder);
+            using var @out = new MemoryStream();
+            preferredQualityFileId.WriteTo(@out);
+            trackGid.WriteTo(@out);
+            var b = audioSeqHolder.ToByteArray();
+            @out.Write(b, 0, b.Length);
+            @out.Write(ZERO_SHORT, 0, ZERO_SHORT.Length);
+            await TcpState.SendPackageAsync(new MercuryPacket(MercuryPacketType.RequestKey, @out.ToArray()), ct);
+
+            var callback = new KeyCallBack();
+            (TcpState as SpotifyTcpState)._audioKeys.TryAdd(audioSeqHolder, callback);
+
+            using var timeout_cts = new CancellationTokenSource();
+            timeout_cts.CancelAfter(TimeSpan.FromMilliseconds(KeyCallBack.AudioKeyRequestTimeout));
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(timeout_cts.Token, ct);
+            var key = await callback.WaitResponseAsync(cts.Token);
+            if (key != null) return key;
+            if (retry) return await GetAudioKeyAsync(trackGid, preferredQualityFileId, false, ct);
+            throw new AesKeyException(
+                $"Failed fetching audio key! gid: " +
+                $"{trackGid.ToByteArray().BytesToHex()}," +
+                $" fileId: {preferredQualityFileId.ToByteArray().BytesToHex()}");
+        }
+
+        public async Task<MercuryResponse> SendAndReceiveAsMercuryResponse(
+            string mercuryUri,
+            MercuryRequestType type = MercuryRequestType.Get,
+            CancellationToken ct = default)
+        {
+            var response = await TcpState.SendAndReceiveAsResponse(mercuryUri, type, ct);
+            if (response is { StatusCode: >= 200 and < 300 })
+            {
+                return response.Value;
+            }
+
+            throw new MercuryException(response);
+        }
+
+
+
         public async Task UpdateLocaleAsync(string locale, CancellationToken ct = default)
         {
             if (TcpState is not

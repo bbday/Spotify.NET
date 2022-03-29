@@ -25,25 +25,38 @@ namespace SpotifyNET.Models
         [JsonConstructor]
         public SpotifyId(string uri)
         {
+            IsValidId = false;
+            Id = null;
             Uri = uri;
+            Source = PlayType.Local;
+            Type = AudioItemType.Unknown;
             var s =
                 uri.SplitLines();
-            if (s.MoveNext())
+
+            var i = 0;
+            while (s.MoveNext())
             {
-                Source = (PlayType)Enum.Parse(typeof(PlayType), s.Current.Line.ToString(), true);
-                if (s.MoveNext())
+                switch (i)
                 {
-                    Type = GetType(s.Current.Line, uri);
-                    if (s.MoveNext())
-                    {
+                    case 0:
+                        Source = (PlayType)Enum.Parse(typeof(PlayType), s.Current.Line.ToString(), true);
+                        i++;
+                        break;
+                    case 1:
+                        Type = GetType(s.Current.Line, uri);
+                        i++;
+                        break;
+                    case 2:
                         Id = s.Current.Line.ToString();
-                        return;
-                    }
+                        i++;
+                        IsValidId = true;
+                        break;
+                    default:
+                        break;
                 }
             }
-
-            throw new NotFiniteNumberException();
         }
+        public bool IsValidId { get; }
         public PlayType Source { get; }
         public string Uri { get; }
         public AudioItemType Type { get; }

@@ -21,21 +21,22 @@ namespace SpotifyNET.Helpers
 
         public static bool IsEmpty(this string str) => string.IsNullOrEmpty(str);
 
-        public static LineSplitEnumerator SplitLines(this string str)
+        public static LineSplitEnumerator SplitLines(this string str, char seperator = ':')
         {
             // LineSplitEnumerator is a struct so there is no allocation here
-            return new LineSplitEnumerator(str.AsSpan());
+            return new LineSplitEnumerator(str.AsSpan(), seperator);
         }
 
         // Must be a ref struct as it contains a ReadOnlySpan<char>
         public ref struct LineSplitEnumerator
         {
             private ReadOnlySpan<char> _str;
-
-            public LineSplitEnumerator(ReadOnlySpan<char> str)
+            private readonly char _seperator;
+            public LineSplitEnumerator(ReadOnlySpan<char> str, char seperator = ':')
             {
                 _str = str;
                 Current = default;
+                _seperator = seperator;
             }
 
             // Needed to be compatible with the foreach operator
@@ -47,7 +48,7 @@ namespace SpotifyNET.Helpers
                 if (span.Length == 0)
                     return false;
 
-                var index = span.IndexOf(':');
+                var index = span.IndexOf(_seperator);
                 if (index == -1)
                 {
                     _str = ReadOnlySpan<char>.Empty;
@@ -55,7 +56,7 @@ namespace SpotifyNET.Helpers
                     return true;
                 }
 
-                if (index < span.Length - 1 && span[index] == ':')
+                if (index < span.Length - 1 && span[index] == _seperator)
                 {
                     Current = new
                         LineSplitEntry(span.Slice(0, index), span.Slice(index, 1));

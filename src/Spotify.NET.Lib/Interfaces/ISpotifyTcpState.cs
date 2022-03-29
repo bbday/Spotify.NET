@@ -22,7 +22,12 @@ public interface ISpotifyTcpState : IDisposable
     TcpClient? TcpClient { get; }
 
     Task ConnectToTcpClient(CancellationToken ct = default);
-
+    /// <summary>
+    /// The country code returned by Spotify. This is used for many things such as determining availability of a track.
+    /// Note: This cannot be used to get around region-locked content. As the spotify api will simply refuse to return playable urls.
+    /// This is used so the client can avoid unnecesary api calls. 
+    /// </summary>
+    string? ReceivedCountryCode { get; }
     Task SendPackageAsync(
         MercuryPacket packet,
         CancellationToken ct = default);

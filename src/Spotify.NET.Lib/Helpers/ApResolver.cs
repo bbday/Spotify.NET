@@ -7,12 +7,12 @@ using System.Threading.Tasks;
 
 namespace SpotifyNET.Helpers;
 
-internal static class ApResolver
+public static class ApResolver
 {
     private static HttpClient _httpClient = new HttpClient();
     private static string _resolvedSpClient;
 
-    internal static async Task<(string, ushort)[]> GetClosestAccessPoint(CancellationToken ct)
+    public static async Task<(string, ushort)[]> GetClosestAccessPoint(CancellationToken ct)
     {
         using var test = await 
             _httpClient.GetStreamAsync("http://apresolve.spotify.com/?type=accesspoint");
@@ -33,7 +33,7 @@ internal static class ApResolver
         public string[] accesspoint { get; }
     }
 
-    internal static async Task<string> GetClosestDealerAsync(CancellationToken ct)
+    public static async Task<string> GetClosestDealerAsync(CancellationToken ct)
     {
         using var test = await 
             _httpClient.GetStreamAsync("http://apresolve.spotify.com/?type=dealer");
@@ -52,7 +52,7 @@ internal static class ApResolver
         public string[] dealer { get; }
     }
 
-    internal static async Task<string> GetClosestSpClient(CancellationToken ct = default)
+    public static async Task<string> GetClosestSpClient(CancellationToken ct = default)
     {
         if (!string.IsNullOrEmpty(_resolvedSpClient))
             return _resolvedSpClient;

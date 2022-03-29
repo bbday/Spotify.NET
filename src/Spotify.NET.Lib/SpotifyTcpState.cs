@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CPlayerLib;
@@ -36,8 +37,9 @@ internal class SpotifyTcpState : ISpotifyTcpState,
     private AsyncLock SendLock = new AsyncLock();
     internal ConcurrentDictionary<long, List<byte[]>>
         _partials = new ConcurrentDictionary<long, List<byte[]>>();
-    internal ConcurrentDictionary<long, (AsyncAutoResetEvent Waiter, MercuryResponse? Response)> 
+    internal ConcurrentDictionary<long, (AsyncAutoResetEvent Waiter, MercuryResponse? Response)>
         _waiters = new ConcurrentDictionary<long, (AsyncAutoResetEvent Waiter, MercuryResponse? Response)>();
+    internal ConcurrentDictionary<int, KeyCallBack> _audioKeys = new ConcurrentDictionary<int, KeyCallBack>();
 
     public SpotifyTcpState(string host,
         ushort port)
@@ -161,7 +163,7 @@ internal class SpotifyTcpState : ISpotifyTcpState,
         for (var i = 1; i < 6; i++)
         {
             mac.TransformBlock(binaryData, 0, binaryData.Length, null, 0);
-            var temp = new[] {(byte) i};
+            var temp = new[] { (byte)i };
             mac.TransformBlock(temp, 0, temp.Length, null, 0);
             mac.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
             var final = mac.Hash;
@@ -249,7 +251,7 @@ internal class SpotifyTcpState : ISpotifyTcpState,
         var requestHeader = req.Header;
 
         using var bytesOut = new MemoryStream();
-        var s4B = BitConverter.GetBytes((short) 4).Reverse().ToArray();
+        var s4B = BitConverter.GetBytes((short)4).Reverse().ToArray();
         bytesOut.Write(s4B, 0, s4B.Length); // Seq length
 
         var seqB = BitConverter.GetBytes(sequence).Reverse()
@@ -257,11 +259,11 @@ internal class SpotifyTcpState : ISpotifyTcpState,
         bytesOut.Write(seqB, 0, seqB.Length); // Seq
 
         bytesOut.WriteByte(1); // Flags
-        var reqpB = BitConverter.GetBytes((short) (1 + requestPayload.Length)).Reverse().ToArray();
+        var reqpB = BitConverter.GetBytes((short)(1 + requestPayload.Length)).Reverse().ToArray();
         bytesOut.Write(reqpB, 0, reqpB.Length); // Parts count
 
         var headerBytes2 = requestHeader.ToByteArray();
-        var hedBls = BitConverter.GetBytes((short) headerBytes2.Length).Reverse().ToArray();
+        var hedBls = BitConverter.GetBytes((short)headerBytes2.Length).Reverse().ToArray();
 
         bytesOut.Write(hedBls, 0, hedBls.Length); // Header length
         bytesOut.Write(headerBytes2, 0, headerBytes2.Length); // Header
@@ -270,7 +272,7 @@ internal class SpotifyTcpState : ISpotifyTcpState,
         foreach (var part in requestPayload)
         {
             // Parts
-            var l = BitConverter.GetBytes((short) part.Length).Reverse().ToArray();
+            var l = BitConverter.GetBytes((short)part.Length).Reverse().ToArray();
             bytesOut.Write(l, 0, l.Length);
             bytesOut.Write(part, 0, part.Length);
         }
@@ -303,9 +305,9 @@ internal class SpotifyTcpState : ISpotifyTcpState,
         var cmd = packet.Cmd;
         using (await SendLock.LockAsync(ct))
         {
-            var payloadLengthAsByte = BitConverter.GetBytes((short) payload.Length).Reverse().ToArray();
+            var payloadLengthAsByte = BitConverter.GetBytes((short)payload.Length).Reverse().ToArray();
             using var yetAnotherBuffer = new MemoryStream(3 + payload.Length);
-            yetAnotherBuffer.WriteByte((byte) cmd);
+            yetAnotherBuffer.WriteByte((byte)cmd);
             await yetAnotherBuffer.WriteAsync(payloadLengthAsByte, 0, payloadLengthAsByte.Length, ct);
             await yetAnotherBuffer.WriteAsync(payload, 0, payload.Length, ct);
 
@@ -346,7 +348,7 @@ internal class SpotifyTcpState : ISpotifyTcpState,
             ReceiveCipher.decrypt(headerBytes);
 
             var cmd = headerBytes[0];
-            var payloadLength = (short) ((headerBytes[1] << 8) | (headerBytes[2] & 0xFF));
+            var payloadLength = (short)((headerBytes[1] << 8) | (headerBytes[2] & 0xFF));
 
             var payloadBytes = new byte[payloadLength];
             await networkStream.ReadCompleteAsync(payloadBytes, 0, payloadBytes.Length, ct);
@@ -357,7 +359,7 @@ internal class SpotifyTcpState : ISpotifyTcpState,
 
             var expectedMac = new byte[4];
             ReceiveCipher.finish(expectedMac);
-            return new MercuryPacket((MercuryPacketType) cmd, payloadBytes);
+            return new MercuryPacket((MercuryPacketType)cmd, payloadBytes);
         }
     }
 
@@ -375,7 +377,7 @@ internal class SpotifyTcpState : ISpotifyTcpState,
             {
                 Platform = Platform.Win32X86,
                 Product = Product.Client,
-                ProductFlags = {ProductFlags.ProductFlagNone},
+                ProductFlags = { ProductFlags.ProductFlagNone },
                 Version = 112800721
             }
         };
@@ -461,6 +463,10 @@ internal class SpotifyTcpState : ISpotifyTcpState,
                         }
 
                         break;
+                    case MercuryPacketType.CountryCode:
+                        var countryCode = Encoding.UTF8.GetString(newPacket.Payload);
+                        ReceivedCountryCode = countryCode;
+                        break;
                     case MercuryPacketType.PongAck:
                         break;
                     case MercuryPacketType.MercuryReq:
@@ -473,7 +479,7 @@ internal class SpotifyTcpState : ISpotifyTcpState,
                         break;
                     case MercuryPacketType.AesKeyError:
                     case MercuryPacketType.AesKey:
-                        //_ = HandleAesKey(newPacket, linked.Token);
+                        HandleAesKey(newPacket);
                         break;
                 }
             }
@@ -505,32 +511,68 @@ internal class SpotifyTcpState : ISpotifyTcpState,
 
     }
 
+    private void HandleAesKey(MercuryPacket newPacket)
+    {
+        using var payload = new MemoryStream(newPacket.Payload);
+        var seq = 0;
+        var buffer = newPacket.Payload;
+        seq = newPacket.Payload.getInt((int)payload.Position, true);
+        payload.Seek(4, SeekOrigin.Current);
+        if (!_audioKeys.ContainsKey(seq))
+        {
+            Debug.WriteLine("Couldn't find callback for seq: " + seq);
+            return;
+        }
+
+        var p = _audioKeys[seq];
+        switch (newPacket.Cmd)
+        {
+            case MercuryPacketType.AesKey:
+                var key = new byte[16];
+                payload.Read(key, 0, key.Length);
+                _audioKeys[seq].Key(key);
+                break;
+            case MercuryPacketType.AesKeyError:
+                var code = newPacket.Payload.getShort((int)payload.Position, true);
+                payload.Seek(2, SeekOrigin.Current);
+                //TODO: Error
+                Debugger.Break();
+                break;
+            default:
+                Debug.WriteLine("Couldn't handle packet, cmd: {0}, length: {1}", newPacket.Cmd, newPacket.Payload.Length);
+                break;
+
+        }
+    }
+
+    public string ReceivedCountryCode { get; private set; }
+
     private void HandleMercury(MercuryPacket packet)
     {
         using var stream = new MemoryStream(packet.Payload);
-        int seqLength = packet.Payload.getShort((int) stream.Position, true);
+        int seqLength = packet.Payload.getShort((int)stream.Position, true);
         stream.Seek(2, SeekOrigin.Current);
         long seq = 0;
         var buffer = packet.Payload;
         switch (seqLength)
         {
             case 2:
-                seq = packet.Payload.getShort((int) stream.Position, true);
+                seq = packet.Payload.getShort((int)stream.Position, true);
                 stream.Seek(2, SeekOrigin.Current);
                 break;
             case 4:
-                seq = packet.Payload.getInt((int) stream.Position, true);
+                seq = packet.Payload.getInt((int)stream.Position, true);
                 stream.Seek(4, SeekOrigin.Current);
                 break;
             case 8:
-                seq = packet.Payload.getLong((int) stream.Position, true);
+                seq = packet.Payload.getLong((int)stream.Position, true);
                 stream.Seek(8, SeekOrigin.Current);
                 break;
         }
 
-        var flags = packet.Payload[(int) stream.Position];
+        var flags = packet.Payload[(int)stream.Position];
         stream.Seek(1, SeekOrigin.Current);
-        var parts = packet.Payload.getShort((int) stream.Position, true);
+        var parts = packet.Payload.getShort((int)stream.Position, true);
         stream.Seek(2, SeekOrigin.Current);
 
         _partials.TryGetValue(seq, out var partial);
@@ -546,7 +588,7 @@ internal class SpotifyTcpState : ISpotifyTcpState,
 
         for (var j = 0; j < parts; j++)
         {
-            var size = packet.Payload.getShort((int) stream.Position, true);
+            var size = packet.Payload.getShort((int)stream.Position, true);
             stream.Seek(2, SeekOrigin.Current);
 
             var buffer2 = new byte[size];
@@ -554,7 +596,7 @@ internal class SpotifyTcpState : ISpotifyTcpState,
             var end = buffer2.Length;
             for (var z = 0; z < end; z++)
             {
-                var a = packet.Payload[(int) stream.Position];
+                var a = packet.Payload[(int)stream.Position];
                 stream.Seek(1, SeekOrigin.Current);
                 buffer2[z] = a;
             }
