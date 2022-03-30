@@ -11,8 +11,8 @@ namespace SpotifyNET.Models
 {
     public enum PlayType
     {
-        Spotify,
-        Local
+        spotify,
+        local
     }
     public readonly struct SpotifyId : IEquatable<SpotifyId>, IComparable<SpotifyId>
     {
@@ -28,7 +28,7 @@ namespace SpotifyNET.Models
             IsValidId = false;
             Id = null;
             Uri = uri;
-            Source = PlayType.Local;
+            Source = PlayType.local;
             Type = AudioItemType.Unknown;
             var s =
                 uri.SplitLines();
@@ -39,7 +39,15 @@ namespace SpotifyNET.Models
                 switch (i)
                 {
                     case 0:
-                        Source = (PlayType)Enum.Parse(typeof(PlayType), s.Current.Line.ToString(), true);
+                        switch (s.Current.Line.ToString())
+                        {
+                            case nameof(PlayType.local):
+                                Source = PlayType.local;
+                                break;
+                            case nameof(PlayType.spotify):
+                                Source = PlayType.spotify;
+                                break;
+                        }
                         i++;
                         break;
                     case 1:

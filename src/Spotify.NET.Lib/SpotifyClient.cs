@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -10,6 +11,7 @@ using System.Threading.Tasks;
 using CPlayerLib;
 using Google.Protobuf;
 using Nito.AsyncEx;
+using Spotify.Metadata;
 using SpotifyNET.Enums;
 using SpotifyNET.Exceptions;
 using SpotifyNET.Helpers;
@@ -233,7 +235,19 @@ namespace SpotifyNET
             if (string.IsNullOrEmpty(a.AccessToken)) return null;
             return a;
         }
-        
+
+        public IEnumerable<UrlImage> GetCoverImages(ImageGroup group)
+        {
+            var url = (TcpState as SpotifyTcpState).UserAttributes["image-url"];
+
+            return group.Image.Select(z=> new UrlImage
+            {
+                Url = url.Replace("{file_id}", z.FileId.ToByteArray().BytesToHex().ToLowerInvariant()),
+                Height = z.Height,
+                Width = z.Width
+            });
+        }
+
         private static T Deserialize<T>(MercuryResponse resp) =>
             System.Text.Json.JsonSerializer.Deserialize<T>(
                 new ReadOnlySpan<byte>(resp.Payload.SelectMany(z => z).ToArray()), opts);
@@ -247,5 +261,12 @@ namespace SpotifyNET
         {
             throw new NotImplementedException();
         }
+    }
+
+    public struct UrlImage
+    {
+        public string? Url { get; init; }
+        public int? Height { get; init; }
+        public int? Width { get; init; }
     }
 }

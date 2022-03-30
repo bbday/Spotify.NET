@@ -198,7 +198,9 @@ namespace Spotify.NET.Playback
         public override int Read(byte[] buffer, int offset, int count)
         {
             if (count == 0) return 0;
-            if (pos >= Length) return -1; 
+            if (pos >= Length) return -1;
+
+            int i = 0;
             //while (true)
             //{
             try
@@ -210,12 +212,13 @@ namespace Spotify.NET.Playback
 
                 if(!_available[chunk]) 
                     AsyncContext.Run(async () => await GetChunkAsync((ushort)chunk));
-                int copy = Math.Min(_buffer[chunk].Length - chunkOff, count);
+                int copy = Math.Min(_buffer[chunk].Length - chunkOff, count - i);
                 Array.Copy(_buffer[chunk],
-                    chunkOff, buffer, offset, copy);
+                    chunkOff, buffer, offset + i, copy);
+                i += copy;
                 pos += copy;
 
-                return copy;
+                return i;
                 //if (i == count || Position >= Length)
             }
             catch (Exception x)

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -10,6 +11,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml;
 using CPlayerLib;
 using Google.Protobuf;
 using Nito.AsyncEx;
@@ -481,6 +483,9 @@ internal class SpotifyTcpState : ISpotifyTcpState,
                     case MercuryPacketType.AesKey:
                         HandleAesKey(newPacket);
                         break;
+                    case MercuryPacketType.ProductInfo:
+                        ParseProductInfo(newPacket.Payload);
+                        break;
                 }
             }
             catch (IOException io)
@@ -510,7 +515,33 @@ internal class SpotifyTcpState : ISpotifyTcpState,
         }
 
     }
+    private void ParseProductInfo(byte[] @in)
+    {
+        var productInfoString = Encoding.Default.GetString(@in);
+        Debug.WriteLine(productInfoString);
+        var xml = new XmlDocument();
+        xml.LoadXml(productInfoString);
 
+        var products = xml.SelectNodes("products");
+        var dc = new Dictionary<string, string>();
+        if (products != null && products.Count > 0)
+        {
+            var firstItemAsProducts = products[0];
+
+            var product = firstItemAsProducts.ChildNodes[0];
+
+            var properties = product.ChildNodes;
+            for (var i = 0; i < properties.Count; i++)
+            {
+                var node = properties.Item(i);
+                dc.Add(node.Name, node.InnerText);
+            }
+        }
+
+        UserAttributes = new ReadOnlyDictionary<string, string>(dc);
+    }
+
+    public IReadOnlyDictionary<string, string> UserAttributes { get; private set; }
     private void HandleAesKey(MercuryPacket newPacket)
     {
         using var payload = new MemoryStream(newPacket.Payload);

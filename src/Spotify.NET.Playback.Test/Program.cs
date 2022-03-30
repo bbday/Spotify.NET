@@ -9,7 +9,7 @@ using SpotifyNET.OneTimeStructures;
 //var libDirectory =
 //  new DirectoryInfo(Path.Combine(currentDirectory, "libvlc", IntPtr.Size == 4 ? "win-x86" : "win-x64"));
 
-using var libvlc = new LibVLC(enableDebugLogs: true, "--network-caching=0", "--no-ts-trust-pcr");
+using var libvlc = new LibVLC(enableDebugLogs: true);
 using var mediaplayer = new MediaPlayer(libvlc);
 
 var pass = Environment.GetEnvironmentVariable("spotify_pass", EnvironmentVariableTarget.User);
@@ -24,7 +24,7 @@ Console.WriteLine($"Welcome {apWelcome.CanonicalUsername}");
 //https://open.spotify.com/track/6HN2uyyO6Wlbyp5qnooNpn?si=cec1f7496d534225
 //https://open.spotify.com/track/3AUTwFhXWmB9Ty350sIlK2?si=a9595ad6203343a7
 //https://open.spotify.com/track/0q5lnUuDhlogtYCOubNQhQ?si=155cf4f026de4bd5
-var 君という名の翼 = new SpotifyId("spotify:track:0q5lnUuDhlogtYCOubNQhQ");
+var 君という名の翼 = new SpotifyId("spotify:track:7jkrxM1JAK7BAjrKZY7EnD");
 //
 var a = await client.StreamItemAsync(君という名の翼, AudioQualityExtensions.AudioQuality.HIGH);
 
