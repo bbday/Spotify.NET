@@ -13,5 +13,5 @@ public interface ISpotifyRemoteConnect : IDisposable
     bool IsConnected { get; }
     Cluster CurrentCluster { get; }
     event EventHandler<Cluster> ClusterUpdated;
-    Task<Cluster> ConnectAsync(CancellationToken ct = default);
+    Task ConnectAsync(CancellationToken ct = default);
 }

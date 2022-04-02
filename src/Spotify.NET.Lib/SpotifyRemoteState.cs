@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Net;
@@ -11,6 +12,7 @@ using Google.Protobuf;
 using SpotifyNET.Enums;
 using SpotifyNET.Interfaces;
 using SpotifyNET.Models;
+using SpotifyNET.OneTimeStructures;
 
 namespace SpotifyNET;
 
@@ -28,6 +30,14 @@ public class SpotifyRemoteState : ISpotifyRemoteState
 
     private void SpotifyRemoteConnectOnConnectionIdUpdated(object sender, string e)
     {
+        Player.PutState = new PutStateRequest
+        {
+            MemberType = MemberType.ConnectState,
+            Device = new Device
+            {
+                DeviceInfo = InitializeDeviceInfo(_spotifyRemoteConnect.SpotifyClient.Config),
+            }
+        };
         Player.State = InitState(Player.State);
     }
 
@@ -38,7 +48,7 @@ public class SpotifyRemoteState : ISpotifyRemoteState
     {
         if (Player == null)
             return RequestResult.DeviceNotFound;
-        
+
         _lastCommandSentByDeviceId = request.Sender;
         if (!request.Command.TryGetProperty("endpoint", out var endpoinStr))
             return RequestResult.UnknownSendCommandResult;
@@ -50,14 +60,14 @@ public class SpotifyRemoteState : ISpotifyRemoteState
     }
 
     public async Task<byte[]> UpdateState(
-        PutStateReason reason, 
+        PutStateReason reason,
         int playertime = -1)
     {
-        var timestamp = (ulong) TimeHelper.CurrentTimeMillisSystem;
+        var timestamp = (ulong)TimeHelper.CurrentTimeMillisSystem;
         if (playertime == -1)
             Player.PutState.HasBeenPlayingForMs = 0L;
         else
-            Player.PutState.HasBeenPlayingForMs = (ulong) Math.Min((ulong) playertime,
+            Player.PutState.HasBeenPlayingForMs = (ulong)Math.Min((ulong)playertime,
                 timestamp - Player.PutState.StartedPlayingAt);
 
         Player.PutState.PutStateReason = reason;
@@ -89,53 +99,87 @@ public class SpotifyRemoteState : ISpotifyRemoteState
         return await res.Content.ReadAsByteArrayAsync();
     }
 
-    private PlayerState InitState(PlayerState playerState = null)
+    private static DeviceInfo InitializeDeviceInfo(SpotifyConfig config)
     {
-        if (playerState != null)
+        return new DeviceInfo
         {
-            playerState.PlaybackSpeed = 1.0;
-            playerState.SessionId = string.Empty;
-            playerState.PlaybackId = string.Empty;
-            playerState.Suppressions = new Suppressions();
-            playerState.ContextRestrictions = new Restrictions();
-            playerState.Options = new ContextPlayerOptions
+            CanPlay = true,
+            Name = config.DeviceName,
+            DeviceId = config.DeviceId,
+            DeviceType = DeviceType.Computer,
+            DeviceSoftwareVersion = "Spotify-11.1.0",
+            SpircVersion = "3.2.6",
+            Capabilities = new Capabilities
             {
-                RepeatingTrack = false,
-                ShufflingContext = false,
-                RepeatingContext = false
-            };
-            playerState.Position = 0;
-            playerState.PositionAsOfTimestamp = 0;
-            playerState.IsPlaying = false;
-            playerState.IsSystemInitiated = true;
-            return playerState;
-        }
-
-        Player.PutState.Device.DeviceInfo.Name = _spotifyRemoteConnect.SpotifyClient.Config.DeviceName;
-        Player.PutState.Device.DeviceInfo.DeviceId = _spotifyRemoteConnect.SpotifyClient.Config.DeviceId;
-
-        return new PlayerState
-        {
-            PlaybackSpeed = 1.0,
-            SessionId = string.Empty,
-            PlaybackId = string.Empty,
-            Suppressions = new Suppressions(),
-            ContextRestrictions = new Restrictions(),
-            Options = new ContextPlayerOptions
-            {
-                RepeatingTrack = false,
-                ShufflingContext = false,
-                RepeatingContext = false
-            },
-            Position = 0,
-            PositionAsOfTimestamp = 0,
-            IsPlaying = false,
-            IsSystemInitiated = true
+                CanBePlayer = true,
+                GaiaEqConnectId = true,
+                SupportsLogout = true,
+                IsObservable = true,
+                CommandAcks = true,
+                SupportsRename = true,
+                SupportsTransferCommand = true,
+                SupportsCommandRequest = true,
+                SupportsGzipPushes = true,
+                NeedsFullPlayerState = true,
+                SupportedTypes =
+                {
+                    new List<string>
+                    {
+                        {"audio/episode"},
+                        {"audio/track"}
+                    }
+                }
+            }
         };
     }
 
-    internal void Close()
-    {
-        _spotifyRemoteConnect.ConnectionIdUpdated -= SpotifyRemoteConnectOnConnectionIdUpdated;
+    private PlayerState InitState(PlayerState playerState = null)
+        {
+            if (playerState != null)
+            {
+                playerState.PlaybackSpeed = 1.0;
+                playerState.SessionId = string.Empty;
+                playerState.PlaybackId = string.Empty;
+                playerState.Suppressions = new Suppressions();
+                playerState.ContextRestrictions = new Restrictions();
+                playerState.Options = new ContextPlayerOptions
+                {
+                    RepeatingTrack = false,
+                    ShufflingContext = false,
+                    RepeatingContext = false
+                };
+                playerState.Position = 0;
+                playerState.PositionAsOfTimestamp = 0;
+                playerState.IsPlaying = false;
+                playerState.IsSystemInitiated = true;
+                return playerState;
+            }
+
+            Player.PutState.Device.DeviceInfo.Name = _spotifyRemoteConnect.SpotifyClient.Config.DeviceName;
+            Player.PutState.Device.DeviceInfo.DeviceId = _spotifyRemoteConnect.SpotifyClient.Config.DeviceId;
+
+            return new PlayerState
+            {
+                PlaybackSpeed = 1.0,
+                SessionId = string.Empty,
+                PlaybackId = string.Empty,
+                Suppressions = new Suppressions(),
+                ContextRestrictions = new Restrictions(),
+                Options = new ContextPlayerOptions
+                {
+                    RepeatingTrack = false,
+                    ShufflingContext = false,
+                    RepeatingContext = false
+                },
+                Position = 0,
+                PositionAsOfTimestamp = 0,
+                IsPlaying = false,
+                IsSystemInitiated = true
+            };
+        }
+
+        internal void Close()
+        {
+            _spotifyRemoteConnect.ConnectionIdUpdated -= SpotifyRemoteConnectOnConnectionIdUpdated;
+        }
     }
-}

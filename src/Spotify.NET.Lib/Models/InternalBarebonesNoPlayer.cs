@@ -1,4 +1,5 @@
-﻿using Connectstate;
+﻿using System.Threading.Tasks;
+using Connectstate;
 using SpotifyNET.Enums;
 using SpotifyNET.Interfaces;
 using SpotifyNET.OneTimeStructures;
@@ -45,7 +46,7 @@ internal class InternalBarebonesNoPlayer : ISpotifyPlayer
     }
     public PlayerState State { get; set; }
     public PutStateRequest PutState { get; set; }
-    public RequestResult IncomingCommand(Endpoint endpoint, CommandBody? data)
+    public Task<RequestResult> IncomingCommand(Endpoint endpoint, CommandBody? data)
     {
         throw new System.NotImplementedException();
     }

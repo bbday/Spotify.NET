@@ -69,15 +69,7 @@ namespace SpotifyNET.Models
         public string Uri { get; }
         public AudioItemType Type { get; }
         public string Id { get; }
-        public bool Equals(SpotifyId other)
-        {
-            return Uri == other.Uri;
-        }
-
-        public override bool Equals(object obj)
-        {
-            return obj is SpotifyId other && Equals(other);
-        }
+      
 
         public override int GetHashCode()
         {
@@ -169,6 +161,16 @@ namespace SpotifyNET.Models
         public static SpotifyId FromGid(ByteString albumGid, AudioItemType album)
         {
             return SpotifyId.FromHex(albumGid.ToByteArray().BytesToHex(), album);
+        }
+
+        public bool Equals(SpotifyId other)
+        {
+            return Uri == other.Uri;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is SpotifyId other && Equals(other);
         }
     }
 }

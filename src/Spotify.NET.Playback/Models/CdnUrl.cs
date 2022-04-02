@@ -97,11 +97,10 @@ namespace Spotify.NET.Playback.Models
             }
             else
             {
-                var @param = HttpUtility.ParseQueryString(Url.Query).Get(0);
-                int i = @param.IndexOf('_');
+                int i = Url.Query.IndexOf('_');
                 if (i != -1)
                 {
-                    _expirationMS = long.Parse(@param.AsSpan().Slice(0, i).ToString()) * 1000;
+                    _expirationMS = long.Parse(Url.Query.AsSpan().Slice(0, i).ToString().Replace("?", "")) * 1000;
                 }
             }
 
